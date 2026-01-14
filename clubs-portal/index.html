@@ -1,1 +1,103 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Клубный Портал Колледжа</title>
+    <link rel="stylesheet" href="css/style.css">
+    <link rel="stylesheet" href="css/responsive.css">
+    <link href="https://fonts.googleapis.com/css2?family=Roboto:wght@300;400;500;700&display=swap" rel="stylesheet">
+</head>
+<body>
+    <!-- Навигационное меню -->
+    <nav class="navbar">
+        <div class="container">
+            <a href="index.html" class="logo">Клубный Портал</a>
+            <div class="nav-links">
+                <a href="index.html" class="active">Главная</a>
+                <a href="about.html">О проекте</a>
+                <a href="clubs.html">Кружки</a>
+                <a href="join.html">Записаться</a>
+            </div>
+            <button class="menu-toggle">☰</button>
+        </div>
+    </nav>
 
+    <!-- Основной контент -->
+    <main class="container">
+        <section class="hero">
+            <h1>Найди своё увлечение!</h1>
+            <p class="subtitle">Все кружки и клубы колледжа в одном месте</p>
+            <a href="clubs.html" class="btn-primary">Смотреть все кружки</a>
+        </section>
+
+        <section class="features">
+            <h2>Почему наш портал?</h2>
+            <div class="features-grid">
+                <div class="feature-card">
+                    <div class="feature-icon">🎯</div>
+                    <h3>Всё в одном месте</h3>
+                    <p>Не ищи по разным чатам и доскам — все кружки здесь</p>
+                </div>
+                <div class="feature-card">
+                    <div class="feature-icon">⚡</div>
+                    <h3>Мгновенная запись</h3>
+                    <p>Подай заявку онлайн за 2 минуты</p>
+                </div>
+                <div class="feature-card">
+                    <div class="feature-icon">📅</div>
+                    <h3>Актуальное расписание</h3>
+                    <p>Всегда свежая информация о занятиях</p>
+                </div>
+                <div class="feature-card">
+                    <div class="feature-icon">👥</div>
+                    <h3>Живое сообщество</h3>
+                    <p>Узнай, кто уже участвует</p>
+                </div>
+            </div>
+        </section>
+
+        <section class="popular-clubs">
+            <h2>Популярные кружки</h2>
+            <div id="popular-clubs-container" class="clubs-grid">
+                <!-- Сюда загрузятся популярные кружки через JS -->
+                <p class="loading">Загрузка кружков...</p>
+            </div>
+            <a href="clubs.html" class="btn-secondary">Все кружки →</a>
+        </section>
+
+        <section class="stats">
+            <h2>Портал в цифрах</h2>
+            <div class="stats-grid">
+                <div class="stat">
+                    <span class="stat-number" id="total-clubs">15</span>
+                    <span class="stat-label">кружков</span>
+                </div>
+                <div class="stat">
+                    <span class="stat-number" id="total-categories">4</span>
+                    <span class="stat-label">категории</span>
+                </div>
+                <div class="stat">
+                    <span class="stat-number">247</span>
+                    <span class="stat-label">участников</span>
+                </div>
+                <div class="stat">
+                    <span class="stat-number">56</span>
+                    <span class="stat-label">заявок за неделю</span>
+                </div>
+            </div>
+        </section>
+    </main>
+
+    <footer>
+        <div class="container">
+            <p>© 2024 Клубный Портал Колледжа. Проект учебной группы.</p>
+            <p>Все данные вымышлены, сервис создан в учебных целях.</p>
+        </div>
+    </footer>
+
+    <script src="js/main.js"></script>
+    <script src="js/data.js"></script>
+    <script src="js/render.js"></script>
+</body>
+</html>
