@@ -1,0 +1,222 @@
+import sqlite3
+import os
+
+DB_NAME = 'collector.db'
+
+
+def connect():
+    """Подключение к БД"""
+    return sqlite3.connect(DB_NAME)
+
+
+def init_db():
+    """Создание таблиц"""
+    with connect() as conn:
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS categories (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                name TEXT UNIQUE NOT NULL,
+                description TEXT,
+                is_default INTEGER DEFAULT 0
+            )
+        """)
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS records (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                title TEXT NOT NULL,
+                description TEXT,
+                category_id INTEGER,
+                rating INTEGER CHECK(rating >= 0 AND rating <= 5),
+                status TEXT DEFAULT 'active',
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY (category_id) REFERENCES categories(id)
+            )
+        """)
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS tags (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                name TEXT UNIQUE NOT NULL
+            )
+        """)
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS record_tags (
+                record_id INTEGER,
+                tag_id INTEGER,
+                PRIMARY KEY (record_id, tag_id),
+                FOREIGN KEY (record_id) REFERENCES records(id),
+                FOREIGN KEY (tag_id) REFERENCES tags(id)
+            )
+        """)
+
+
+def add_test_data():
+    """Тестовые данные"""
+    with connect() as conn:
+        # Категории
+        conn.execute("INSERT OR IGNORE INTO categories (name, description, is_default) VALUES (?, ?, ?)",
+                     ('Книги', 'Художественная литература', 1))
+        conn.execute("INSERT OR IGNORE INTO categories (name, description) VALUES (?, ?)",
+                     ('Фильмы', 'Кино'))
+
+        # Теги
+        for tag in ['фантастика', 'детектив', 'комедия']:
+            conn.execute("INSERT OR IGNORE INTO tags (name) VALUES (?)", (tag,))
+
+        # Записи
+        conn.execute("""
+            INSERT OR IGNORE INTO records (title, description, category_id, rating, status)
+            VALUES 
+            ('1984', 'Роман-антиутопия', 1, 5, 'favorite'),
+            ('Начало', 'Фантастический фильм', 2, 5, 'active'),
+            ('Матрица', 'Культовый фильм', 2, 5, 'active')
+        """)
+
+
+if not os.path.exists(DB_NAME):
+    init_db()
+    add_test_data()
+
+
+# ========== ЗАПИСИ ==========
+def get_all_records(conn):
+    """Все записи"""
+    return conn.execute("""
+        SELECT r.id, r.title, r.description, IFNULL(c.name, 'Без категории'),
+               r.rating, r.status, r.created_at
+        FROM records r
+        LEFT JOIN categories c ON r.category_id = c.id
+        ORDER BY r.created_at DESC
+    """).fetchall()
+
+
+def add_record(conn, title, desc, cat_id, rating, status):
+    """Добавить запись"""
+    cur = conn.execute("""
+        INSERT INTO records (title, description, category_id, rating, status)
+        VALUES (?, ?, ?, ?, ?)
+    """, (title, desc, cat_id, rating, status))
+    conn.commit()
+    return cur.lastrowid
+
+
+def get_record(conn, id):
+    """Получить запись по ID"""
+    return conn.execute("SELECT * FROM records WHERE id=?", (id,)).fetchone()
+
+
+def update_record(conn, id, title, desc, cat_id, rating, status):
+    """Обновить запись"""
+    conn.execute("""
+        UPDATE records 
+        SET title=?, description=?, category_id=?, rating=?, status=?
+        WHERE id=?
+    """, (title, desc, cat_id, rating, status, id))
+    conn.commit()
+
+
+def delete_record(conn, id):
+    """Удалить запись"""
+    conn.execute("DELETE FROM records WHERE id=?", (id,))
+    conn.commit()
+
+
+# ========== КАТЕГОРИИ ==========
+def get_categories(conn):
+    """Все категории"""
+    return conn.execute("SELECT id, name, description, is_default FROM categories").fetchall()
+
+
+def add_category(conn, name, desc):
+    """Добавить категорию"""
+    try:
+        conn.execute("INSERT INTO categories (name, description) VALUES (?, ?)", (name, desc))
+        conn.commit()
+        return True
+    except:
+        return False
+
+
+def update_category(conn, id, name, desc):
+    """Обновить категорию"""
+    conn.execute("UPDATE categories SET name=?, description=? WHERE id=?", (name, desc, id))
+    conn.commit()
+
+
+def delete_category(conn, id):
+
+    conn.execute("DELETE FROM categories WHERE id=?", (id,))
+    conn.commit()
+
+
+def set_default_category(conn, id):
+    """Установить по умолчанию"""
+    conn.execute("UPDATE categories SET is_default=0")
+    conn.execute("UPDATE categories SET is_default=1 WHERE id=?", (id,))
+    conn.commit()
+
+
+def get_default_category(conn):
+    """Получить категорию по умолчанию"""
+    r = conn.execute("SELECT id FROM categories WHERE is_default=1").fetchone()
+    return r[0] if r else None
+
+
+# ========== ТЕГИ ==========
+def get_tags(conn):
+    """Все теги"""
+    return conn.execute("SELECT id, name FROM tags").fetchall()
+
+
+def add_tag(conn, name):
+
+    try:
+        conn.execute("INSERT INTO tags (name) VALUES (?)", (name,))
+        conn.commit()
+        return True
+    except:
+        return False
+
+
+def search_by_tag(conn, tag_id):
+    """Поиск по тегу"""
+    return conn.execute("""
+        SELECT r.id, r.title, r.description, IFNULL(c.name, 'Без категории'),
+               r.rating, r.status, r.created_at
+        FROM records r
+        LEFT JOIN categories c ON r.category_id = c.id
+        JOIN record_tags rt ON r.id = rt.record_id
+        WHERE rt.tag_id = ?
+    """, (tag_id,)).fetchall()
+
+
+# ========== ПОИСК ==========
+def search_records(conn, query):
+    """Поиск по названию и описанию"""
+    p = f'%{query}%'
+    return conn.execute("""
+        SELECT r.id, r.title, r.description, IFNULL(c.name, 'Без категории'),
+               r.rating, r.status, r.created_at
+        FROM records r
+        LEFT JOIN categories c ON r.category_id = c.id
+        WHERE LOWER(r.title) LIKE LOWER(?) OR LOWER(r.description) LIKE LOWER(?)
+    """, (p, p)).fetchall()
+
+
+def filter_by_status(conn, status):
+    """Фильтр по статусу"""
+    return conn.execute("""
+        SELECT r.id, r.title, r.description, IFNULL(c.name, 'Без категории'),
+               r.rating, r.status, r.created_at
+        FROM records r
+        LEFT JOIN categories c ON r.category_id = c.id
+        WHERE r.status = ?
+    """, (status,)).fetchall()
+
+
+# ========== СТАТИСТИКА ==========
+def get_stats(conn):
+    """Статистика"""
+    total = conn.execute("SELECT COUNT(*) FROM records").fetchone()[0]
+    by_status = dict(conn.execute("SELECT status, COUNT(*) FROM records GROUP BY status").fetchall())
+    avg = conn.execute("SELECT AVG(rating) FROM records").fetchone()[0]
+    return total, by_status, round(avg, 1) if avg else 0
