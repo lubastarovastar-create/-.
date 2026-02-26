@@ -1,0 +1,319 @@
+import tkinter as tk
+from tkinter import ttk, messagebox, filedialog
+import database as db
+import csv, json, sqlite3
+from datetime import datetime
+
+
+class App:
+    def __init__(self, root):
+        self.root = root
+        root.title("Коллекционер (Фильмы,книги)")
+        root.geometry("1000x700")
+        root.resizable(False, False)
+        root.config(bg="#f5f5f5")
+
+        self.conn = db.connect()
+
+        # Меню
+        menubar = tk.Menu(root)
+        file_menu = tk.Menu(menubar, tearoff=0)
+        file_menu.add_command(label="Экспорт", command=self.export_data)
+        file_menu.add_command(label="Резервная копия", command=self.backup_database)
+        file_menu.add_separator()
+        file_menu.add_command(label="Выход", command=self.exit_app)
+        menubar.add_cascade(label="Файл", menu=file_menu)
+
+        data_menu = tk.Menu(menubar, tearoff=0)
+        data_menu.add_command(label="Добавить", command=self.add_record)
+        data_menu.add_command(label="Редактировать", command=self.edit_record)
+        data_menu.add_command(label="Удалить", command=self.delete_record)
+        menubar.add_cascade(label="Данные", menu=data_menu)
+
+        search_menu = tk.Menu(menubar, tearoff=0)
+        search_menu.add_command(label="Найти", command=self.show_search)
+        search_menu.add_command(label="Сбросить", command=self.reset_filters)
+        menubar.add_cascade(label="Поиск", menu=search_menu)
+        root.config(menu=menubar)
+
+        # Панель инструментов
+        toolbar = tk.Frame(root, bg="#e0e0e0", height=40)
+        toolbar.pack(side=tk.TOP, fill=tk.X)
+        for text, cmd in [("+ Добавить", self.add_record), ("✏️ Редактировать", self.edit_record),
+                          ("🗑️ Удалить", self.delete_record), ("🔍 Поиск", self.show_search),
+                          ("🔄 Обновить", self.load_data)]:
+            tk.Button(toolbar, text=text, command=cmd).pack(side=tk.LEFT, padx=2)
+
+        # Панель поиска
+        self.search_frame = tk.Frame(root, bg="#f0f0f0", height=40)
+        tk.Label(self.search_frame, text="Поиск:", bg="#f0f0f0").pack(side=tk.LEFT, padx=5)
+        self.search_entry = tk.Entry(self.search_frame, width=30)
+        self.search_entry.pack(side=tk.LEFT, padx=5)
+        self.search_entry.bind('<Return>', lambda e: self.search())
+        tk.Button(self.search_frame, text="Искать", command=self.search).pack(side=tk.LEFT, padx=2)
+        tk.Button(self.search_frame, text="Сбросить", command=self.reset_filters).pack(side=tk.LEFT, padx=2)
+
+        # Таблица
+        main_frame = tk.Frame(root, bg="#f5f5f5")
+        main_frame.pack(fill=tk.BOTH, expand=True, padx=5, pady=5)
+
+        columns = ('id', 'title', 'description', 'category', 'rating', 'status', 'created_at')
+        self.tree = ttk.Treeview(main_frame, columns=columns, show='headings', height=20)
+
+        col_settings = [('id', 40, 'center'), ('title', 150, 'w'), ('description', 300, 'w'),
+                        ('category', 100, 'w'), ('rating', 60, 'center'), ('status', 80, 'center'),
+                        ('created_at', 130, 'center')]
+
+        for col, width, anchor in col_settings:
+            self.tree.column(col, width=width, anchor=anchor)
+            self.tree.heading(col, text={'id': 'Id', 'title': 'Название', 'description': 'Жанр',
+                                         'category': 'Категория', 'rating': 'Рейтинг', 'status': 'Статус',
+                                         'created_at': 'Время создания'}[col])
+
+        vsb = ttk.Scrollbar(main_frame, orient='vertical', command=self.tree.yview)
+        hsb = ttk.Scrollbar(main_frame, orient='horizontal', command=self.tree.xview)
+        self.tree.configure(yscrollcommand=vsb.set, xscrollcommand=hsb.set)
+        self.tree.grid(row=0, column=0, sticky='nsew')
+        vsb.grid(row=0, column=1, sticky='ns')
+        hsb.grid(row=1, column=0, sticky='ew')
+        main_frame.grid_rowconfigure(0, weight=1)
+        main_frame.grid_columnconfigure(0, weight=1)
+
+        # Контекстное меню
+        self.context_menu = tk.Menu(self.tree, tearoff=0)
+        for label, cmd in [("Редактировать", self.edit_record), ("Удалить", self.delete_record),
+                           ("Просмотреть", self.view_record)]:
+            self.context_menu.add_command(label=label, command=cmd)
+        self.tree.bind("<Button-3>", lambda e: self.context_menu.post(e.x_root, e.y_root)
+        if self.tree.identify_row(e.y) else None)
+
+        # Статусная панель
+        status_bar = tk.Frame(root, bg="#e0e0e0", height=25)
+        status_bar.pack(side=tk.BOTTOM, fill=tk.X)
+        self.status_label = tk.Label(status_bar, text="Готово", bg="#e0e0e0")
+        self.status_label.pack(side=tk.LEFT, padx=5)
+        self.stats_label = tk.Label(status_bar, text="Записей: 0", bg="#e0e0e0")
+        self.stats_label.pack(side=tk.RIGHT, padx=5)
+
+        self.load_data()
+
+    def load_data(self, data=None):
+        for item in self.tree.get_children():
+            self.tree.delete(item)
+        data = data or db.get_all_records(self.conn)
+        categories = {c[0]: c[1] for c in db.get_categories(self.conn)}
+        for rec in data:
+            display = list(rec)
+            display[3] = categories.get(rec[3], rec[3])
+            self.tree.insert('', tk.END, values=display)
+        total, _, avg = db.get_stats(self.conn)
+        self.stats_label.config(text=f"Записей: {total} | Средний рейтинг: {avg:.1f}")
+
+    def get_selected_id(self):
+        sel = self.tree.selection()
+        return self.tree.item(sel[0])['values'][0] if sel else None
+
+    def search(self):
+        if q := self.search_entry.get().strip():
+            data = db.search_records(self.conn, q)
+            self.load_data(data)
+            self.status_label.config(text=f"Найдено: {len(data)}")
+
+    def reset_filters(self):
+        self.search_entry.delete(0, tk.END)
+        self.load_data()
+        self.status_label.config(text="Фильтры сброшены")
+
+    def show_search(self):
+        if not self.search_frame.winfo_ismapped():
+            self.search_frame.pack(side=tk.TOP, fill=tk.X)
+
+    def add_record(self):
+        self.open_dialog("Добавить запись")
+
+    def edit_record(self):
+        if id := self.get_selected_id():
+            self.open_dialog("Редактировать запись", id)
+        else:
+            messagebox.showwarning("", "Выберите запись")
+
+    def delete_record(self):
+        if id := self.get_selected_id():
+            if messagebox.askyesno("", "Удалить запись?"):
+                db.delete_record(self.conn, id)
+                self.load_data()
+                messagebox.showinfo("", "Запись удалена")
+
+    def view_record(self):
+        if not (id := self.get_selected_id()):
+            return
+        r = db.get_record(self.conn, id)
+        cats = {c[0]: c[1] for c in db.get_categories(self.conn)}
+        status = {"active": "Активный", "favorite": "Избранное", "archived": "Архив"}.get(r[5], r[5])
+        messagebox.showinfo("Просмотр", f"ID: {r[0]}\nНазвание: {r[1]}\nЖанр: {r[2]}\n"
+                                        f"Категория: {cats.get(r[3], '')}\nРейтинг: {r[4]}\nСтатус: {status}\nСоздано: {r[6]}")
+
+    def open_dialog(self, title, id=None):
+        dialog = tk.Toplevel(self.root)
+        dialog.title(title)
+        dialog.geometry("500x400")
+        dialog.transient(self.root)
+        dialog.grab_set()
+
+        r = db.get_record(self.conn, id) if id else None
+        cats = db.get_categories(self.conn)
+        cat_names = [c[1] for c in cats]
+
+        frame = tk.Frame(dialog, bg="#f5f5f5", padx=10, pady=10)
+        frame.pack(fill=tk.BOTH, expand=True)
+
+        tk.Label(frame, text="Название *", bg="#f5f5f5").grid(row=0, column=0, sticky='w', pady=5)
+        title_e = tk.Entry(frame, width=50)
+        title_e.grid(row=0, column=1, pady=5)
+        if r: title_e.insert(0, r[1])
+
+        tk.Label(frame, text="Жанр", bg="#f5f5f5").grid(row=1, column=0, sticky='w', pady=5)
+        desc_t = tk.Text(frame, width=50, height=5)
+        desc_t.grid(row=1, column=1, pady=5)
+        if r and r[2]: desc_t.insert('1.0', r[2])
+
+        tk.Label(frame, text="Категория", bg="#f5f5f5").grid(row=2, column=0, sticky='w', pady=5)
+        cat_c = ttk.Combobox(frame, values=cat_names, state="readonly", width=47)
+        cat_c.grid(row=2, column=1, pady=5)
+        if r and r[3]:
+            for c in cats:
+                if c[0] == r[3]: cat_c.set(c[1])
+        elif def_id := db.get_default_category(self.conn):
+            for c in cats:
+                if c[0] == def_id: cat_c.set(c[1])
+
+        tk.Label(frame, text="Рейтинг (0-5)", bg="#f5f5f5").grid(row=3, column=0, sticky='w', pady=5)
+        rating_s = tk.Spinbox(frame, from_=0, to=5, width=10)
+        rating_s.grid(row=3, column=1, sticky='w', pady=5)
+        rating_s.delete(0, tk.END)
+        rating_s.insert(0, r[4] if r else '0')
+
+        tk.Label(frame, text="Статус", bg="#f5f5f5").grid(row=4, column=0, sticky='w', pady=5)
+        status_v = tk.StringVar(value=r[5] if r else "active")
+        status_f = tk.Frame(frame, bg="#f5f5f5")
+        status_f.grid(row=4, column=1, sticky='w', pady=5)
+        for txt, val in [("Активный", "active"), ("Избранное", "favorite"), ("Архив", "archived")]:
+            tk.Radiobutton(status_f, text=txt, variable=status_v, value=val, bg="#f5f5f5").pack(side=tk.LEFT)
+
+        btn_f = tk.Frame(frame, bg="#f5f5f5")
+        btn_f.grid(row=5, column=0, columnspan=2, pady=20)
+
+        def save():
+            if not title_e.get().strip():
+                messagebox.showwarning("", "Введите название")
+                return
+            cat_id = next((c[0] for c in cats if c[1] == cat_c.get()), None) if cat_c.get() else None
+            try:
+                if id:
+                    db.update_record(self.conn, id, title_e.get(), desc_t.get('1.0', tk.END).strip(),
+                                     cat_id, int(rating_s.get()), status_v.get())
+                else:
+                    db.add_record(self.conn, title_e.get(), desc_t.get('1.0', tk.END).strip(),
+                                  cat_id, int(rating_s.get()), status_v.get())
+                dialog.destroy()
+                self.load_data()
+                messagebox.showinfo("", "Запись сохранена")
+            except Exception as e:
+                messagebox.showerror("", f"Ошибка: {e}")
+
+        tk.Button(btn_f, text="Сохранить", command=save, width=10).pack(side=tk.LEFT, padx=5)
+        tk.Button(btn_f, text="Отмена", command=dialog.destroy, width=10).pack(side=tk.LEFT, padx=5)
+
+    def export_data(self):
+        dlg = tk.Toplevel(self.root)
+        dlg.title("Экспорт")
+        dlg.geometry("300x250")
+        dlg.transient(self.root)
+        dlg.grab_set()
+
+        frame = tk.Frame(dlg, bg="#f5f5f5", padx=20, pady=20)
+        frame.pack(fill=tk.BOTH, expand=True)
+
+        tk.Label(frame, text="Формат:", bg="#f5f5f5").pack()
+        fmt = tk.StringVar(value="csv")
+        for f in [("CSV", "csv"), ("JSON", "json"), ("TXT", "txt")]:
+            tk.Radiobutton(frame, text=f[0], variable=fmt, value=f[1], bg="#f5f5f5").pack()
+
+        tk.Label(frame, text="Данные:", bg="#f5f5f5").pack(pady=(10, 0))
+        scope = tk.StringVar(value="all")
+        tk.Radiobutton(frame, text="Все", variable=scope, value="all", bg="#f5f5f5").pack()
+        tk.Radiobutton(frame, text="Выбранные", variable=scope, value="selected", bg="#f5f5f5").pack()
+
+        def do():
+            data = []
+            if scope.get() == "selected" and self.tree.selection():
+                for item in self.tree.selection():
+                    if r := db.get_record(self.conn, self.tree.item(item)['values'][0]):
+                        data.append(r)
+            else:
+                data = db.get_all_records(self.conn)
+
+            if not data:
+                messagebox.showwarning("", "Нет данных")
+                dlg.destroy()
+                return
+
+            fname = filedialog.asksaveasfilename(defaultextension=f".{fmt.get()}")
+            if not fname:
+                return
+
+            cats = {c[0]: c[1] for c in db.get_categories(self.conn)}
+            status_map = {"active": "Активный", "favorite": "Избранное", "archived": "Архив"}
+
+            try:
+                if fmt.get() == "csv":
+                    with open(fname, 'w', newline='', encoding='utf-8-sig') as f:
+                        w = csv.writer(f)
+                        w.writerow(['ID', 'Название', 'Жанр', 'Категория', 'Рейтинг', 'Статус', 'Дата'])
+                        for r in data:
+                            w.writerow([r[0], r[1], r[2] or "", cats.get(r[3], ""), r[4],
+                                        status_map.get(r[5], r[5]), r[6]])
+
+                elif fmt.get() == "json":
+                    jdata = [{"id": r[0], "title": r[1], "description": r[2] or "",
+                              "category": cats.get(r[3], ""), "rating": r[4],
+                              "status": status_map.get(r[5], r[5]), "created": r[6]} for r in data]
+                    with open(fname, 'w', encoding='utf-8') as f:
+                        json.dump(jdata, f, ensure_ascii=False, indent=2)
+
+                else:  # txt
+                    with open(fname, 'w', encoding='utf-8') as f:
+                        f.write(f"Коллекция ({datetime.now().strftime('%d.%m.%Y')})\n{'=' * 40}\n\n")
+                        for i, r in enumerate(data, 1):
+                            f.write(f"{i}. {r[1]}\n   Жанр: {r[2] or '-'}\n   Категория: {cats.get(r[3], '-')}\n"
+                                    f"   Рейтинг: {r[4]}/5\n   Статус: {status_map.get(r[5], r[5])}\n\n")
+
+                messagebox.showinfo("", f"Сохранено в {fname}")
+                dlg.destroy()
+            except Exception as e:
+                messagebox.showerror("", f"Ошибка: {e}")
+
+        tk.Button(frame, text="Экспорт", command=do).pack(pady=10)
+        tk.Button(frame, text="Отмена", command=dlg.destroy).pack()
+
+    def backup_database(self):
+        fname = filedialog.asksaveasfilename(defaultextension=".db",
+                                             initialvalue=f"backup_{datetime.now():%Y%m%d_%H%M%S}.db")
+        if fname:
+            try:
+                bk = sqlite3.connect(fname)
+                self.conn.backup(bk)
+                bk.close()
+                messagebox.showinfo("", "Резервная копия создана")
+            except Exception as e:
+                messagebox.showerror("", f"Ошибка: {e}")
+
+    def exit_app(self):
+        self.conn.close()
+        self.root.destroy()
+
+
+if __name__ == "__main__":
+    root = tk.Tk()
+    app = App(root)
+    root.mainloop()
